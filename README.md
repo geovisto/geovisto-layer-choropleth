@@ -38,13 +38,14 @@ map.draw(Geovisto.getMapConfigManagerFactory().default({
       "name": "Choropleth layer",
       // mapping of data domains to data dimensions
       "data": {
-        "country": "country", // domain name
+        "geoData": "world polygons", // geo data id
+        "geoId": "country", // domain name
         "value": "value", // domain name
         "aggregation": "sum", // [ "sum", "count" ]
-        "scaling": "median", // [ "median", "relative [0-max]", "relative [min-max]", "decimal [0-max]" ]
-        "range": 7, // 1..7
         "customColor": true,
-        "color": "#e32400"
+        "color": "#e32400",
+        "range": 7, // 1..7
+        "scaling": "median", // [ "median", "relative [0-max]", "relative [min-max]", "decimal [0-max]" ]
       }
     },
   ]
@@ -66,5 +67,5 @@ This package serves as an extension of Geovisto core using the API for Geovisto 
 
 ## License
 
-[MIT](https://github.com/geovisto/geovisto-themes/blob/master/LICENSE)
+[MIT](https://github.com/geovisto/geovisto-layer-choropleth/blob/master/LICENSE)
 
