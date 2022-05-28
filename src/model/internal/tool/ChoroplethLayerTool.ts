@@ -33,21 +33,26 @@ import {
     AbstractLayerTool,
     DataChangeEvent,
     DataManagerChangeEvent,
+    GeoDataChangeEvent,
+    GeoDataManager,
+    GeoDataManagerChangeEvent,
     GeoJSONTypes,
     IDataChangeAnimateOptions,
     IMapAggregationBucket,
     IMapAggregationFunction,
     IMapData,
-    IMapDataChangeEvent,
     IMapDataDomain,
+    IMapDataChangeEvent,
     IMapDataManager,
-    IMapDomainDimension,
     IMapDomain,
+    IMapDomainDimension,
     IMapEvent,
     IMapForm,
     IMapFormControl,
+    IMapLegend,
     IMapToolInitProps,
-    LayerToolRenderType
+    LayerToolRenderType,
+    roundValues
 } from "geovisto";
 
 import IChoroplethLayerTool from '../../types/tool/IChoroplethLayerTool';
@@ -62,6 +67,7 @@ import ChoroplethLayerToolState from './ChoroplethLayerToolState';
 import CustomMinMaxScale from '../scale/CustomMinMaxScale';
 import IScale from '../../types/scale/IScale';
 import RelativeScale from '../scale/RelativeScale';
+import ChoroplethLayerToolMapLegend from "../legend/ChoroplethLayerToolMapLegend";
 
 /**
  * This class represents Choropleth layer tool. It works with geojson polygons representing countries.
@@ -73,6 +79,7 @@ class ChoroplethLayerTool extends AbstractLayerTool implements IChoroplethLayerT
     private selectionToolAPI: ISelectionToolAPI | undefined;
     private themesToolAPI: IThemesToolAPI | undefined;
     private mapForm!: IMapForm;
+    private mapLegend!: IMapLegend;
 
     /**
      * It creates a new tool with respect to the props.
@@ -169,6 +176,23 @@ class ChoroplethLayerTool extends AbstractLayerTool implements IChoroplethLayerT
     }
 
     /**
+     * It creates new legend control.
+     */
+    protected createMapLegend(): IMapLegend {
+        return new ChoroplethLayerToolMapLegend(this);
+    }
+
+    /**
+     * It returns a legend.
+     */
+    public getMapLegend(): IMapLegend {
+        if(this.mapLegend == undefined) {
+            this.mapLegend = this.createMapLegend();
+        }
+        return this.mapLegend;
+    }
+
+    /**
      * Overrides the super method.
      * 
      * @param initProps
@@ -192,6 +216,16 @@ class ChoroplethLayerTool extends AbstractLayerTool implements IChoroplethLayerT
                 // create geojson layer
                 const geoJSONlayer: L.GeoJSON = this.createGeoJSONLayer();
                 this.getState().setGeoJSONLayer(geoJSONlayer);
+
+                // Check if hierarchy items are enabled, else it makes all polygons availibale at start.
+                const domManager = this.getState().getDimensions().geoData.getDomainManager() as GeoDataManager;
+                const domainName = this.getState().getDimensions().geoData.getValue()?.getName() ?? "";
+                const geo = domManager.getFeatures(domainName, [ GeoJSONTypes.MultiPolygon, GeoJSONTypes.Polygon ]);
+                const hierarchyFlag = (domManager.isHierarchyEnabled() && domManager.isHierarchyEnabledForDomain(domainName)) ? true : false;
+                
+                if (geo && hierarchyFlag) {
+                    this.updateGeoData();
+                }
             
                 return [ geoJSONlayer ];
             }
@@ -240,9 +274,25 @@ class ChoroplethLayerTool extends AbstractLayerTool implements IChoroplethLayerT
             this.getState().setHoveredItem(id);
             this.hoverItem(layerItem, true);
             this.getState().getBucketData().get(layerItem.feature?.id?.toString() ?? "");
-            const popupText: string = "<b>" + e.target.feature.name + "</b><br>"
-                                + this.getState().getDimensions().aggregation.getValue()?.getName() + ": "
-                                + separateThousands(id ? (this.getState().getBucketData().get(id)?.getValue() ?? 0) : 0);
+            let popupText: string;
+            let units = this.getState().getDimensions().units.getValue();
+            // Check if units are not disabled
+            if (this.getState().getDimensions().unitsEnabled.getValue() == false) {
+                units = "";
+            }
+            if (this.getState().getDimensions().round.getValue() != undefined) {
+                popupText = "<b>" + e.target.feature.name + "</b><br>"
+                    + this.getState().getDimensions().aggregation.getValue()?.getName() + ": "
+                    + separateThousands(id ? (roundValues(this.getState().getBucketData().get(id)?.getValue() ?? 0,
+                        <number>this.getState().getDimensions().round.getValue())) : 0)
+                    + (units == "" ? "" : (" " + units));
+            }
+            else {
+                popupText = "<b>" + e.target.feature.name + "</b><br>"
+                    + this.getState().getDimensions().aggregation.getValue()?.getName() + ": "
+                    + separateThousands(id ? (this.getState().getBucketData().get(id)?.getValue() ?? 0) : 0)
+                    + (units == "" ? "" : (" " + units));
+            }
             e.target.bindTooltip(popupText,{className: 'leaflet-popup-content', sticky: true}).openTooltip();
         
             if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
@@ -297,7 +347,24 @@ class ChoroplethLayerTool extends AbstractLayerTool implements IChoroplethLayerT
 
         if(layer) {
             layer.clearLayers();
+
+            // Hierarchy check for availability of selected domain. 
+            const domManager = this.getState().getDimensions().geoData.getDomainManager() as GeoDataManager;
+            const domainName = this.getState().getDimensions().geoData.getValue()?.getName() ?? "";
+            const geo = domManager.getFeatures(domainName, [ GeoJSONTypes.MultiPolygon, GeoJSONTypes.Polygon ]);
+            const hierarchyFlag = (domManager.isHierarchyEnabled() && domManager.isHierarchyEnabledForDomain(domainName)) ? true : false;
+
             const geoJSON = this.getState().getDimensions().geoData.getValue()?.getFeatures([ GeoJSONTypes.MultiPolygon, GeoJSONTypes.Polygon ]);
+
+            // If there are active objects, and hierarchy is enabled globaly and for selected domain, create hierarchy layer.
+            if (geo && hierarchyFlag) {
+                layer.addData(geo);
+                return layer;
+            } else if (geoJSON) {
+                layer.addData(geoJSON);
+                return layer;
+            }
+
             if(geoJSON) {
                 layer.addData(geoJSON);
             }
@@ -310,6 +377,9 @@ class ChoroplethLayerTool extends AbstractLayerTool implements IChoroplethLayerT
      * It updates the bucket data so it represents the current data.
      */
     protected updateData(): Map<string, IMapAggregationBucket> {
+        let hierarchySucces = false;
+        let bucketHierarchyMap = new Map<string, IMapAggregationBucket>();
+
         // initialize a hash map of aggreation buckets
         const bucketMap = new Map<string, IMapAggregationBucket>();
 
@@ -345,12 +415,61 @@ class ChoroplethLayerTool extends AbstractLayerTool implements IChoroplethLayerT
                     aggregationBucket.addValue(foundValues.length == 1 ? (typeof foundValues[0] === "number" ? foundValues[0] : 1) : 0);
                 }   
             }
+
+            // hierarchy support
+            const domManager = this.getState().getDimensions().geoData.getDomainManager() as GeoDataManager;
+            const domainName = this.getState().getDimensions().geoData.getValue()?.getName() ?? "";
+            
+            // if aggregation is enabled in hierarchy mode, aggregate.
+            if(domManager.isHierarchyEnabledForDomain(domainName) && domManager.isHierarchyEnabled()) {
+                const active = domManager.getActiveByTree(domainName);
+
+                // If aggregation is enabled, start aggregating
+                if (domManager.treeAggregationFlag(domainName)) {
+                    // Iterate over active objects, creates aggregation bucket for each.
+                    active.forEach(activeGeo =>{
+                        let aggrBucket: IMapAggregationBucket | undefined;
+                        // Get childs of active object.
+                        const childs = domManager.getChildsFromTree(domainName, activeGeo);
+                        if (!bucketHierarchyMap.has(activeGeo)) {
+                            aggrBucket = aggregationDimension.getAggregationBucket();
+                            bucketHierarchyMap.set(activeGeo, aggrBucket);
+                        }
+                        // Iterates over childs
+                        childs.forEach(child => {
+                            if (bucketMap.has(child)) {
+                                if (aggrBucket){
+                                    const ans = bucketMap.get(child)?.getValue();
+                                    // Check if aggregation type is count or sum.
+                                    if (aggregationDimension.getName() === "count") {
+                                        if (ans) {
+                                            for(let cnt = 0; cnt < ans; cnt++){
+                                                aggrBucket.addValue(1);
+                                            }
+                                        }
+                                    } else {
+                                        aggrBucket.addValue(typeof ans === "number" ? ans : 1);
+                                    }
+                                }
+                            }
+                        });
+                    });
+                // If agregation is disabled, just copy bucket Map form original aggregation.
+                } else {
+                    bucketHierarchyMap = bucketMap;
+                }
+                hierarchySucces = true;
+            }
         }
 
-        // updates bucket data
-        this.getState().setBucketData(bucketMap);
-
-        return bucketMap;
+        // Updates bucket data
+        if(hierarchySucces) {
+            this.getState().setBucketData(bucketHierarchyMap);
+            return bucketHierarchyMap;
+        } else {
+            this.getState().setBucketData(bucketMap);
+            return bucketMap;
+        }
     }
 
     /**
@@ -374,6 +493,8 @@ class ChoroplethLayerTool extends AbstractLayerTool implements IChoroplethLayerT
                 this.updateStyle(animateOptions);
                 break;
         }
+
+        super.render(type);
     }
 
     /**
@@ -410,6 +531,12 @@ class ChoroplethLayerTool extends AbstractLayerTool implements IChoroplethLayerT
      */
     public handleEvent(event: IMapEvent): void {
         switch (event.getType()) {
+            case GeoDataManagerChangeEvent.TYPE():
+                this.render(LayerToolRenderType.LAYER);
+                break;
+            case GeoDataChangeEvent.TYPE():
+                this.render(LayerToolRenderType.LAYER);
+                break;
             case DataManagerChangeEvent.TYPE():
                 this.render(LayerToolRenderType.DATA);
                 break;
@@ -423,6 +550,7 @@ class ChoroplethLayerTool extends AbstractLayerTool implements IChoroplethLayerT
                 this.updateTheme((<IThemesToolEvent> event).getChangedObject());
                 this.render(LayerToolRenderType.STYLE);
                 break;
+
             default:
                 break;
         }
@@ -457,7 +585,7 @@ class ChoroplethLayerTool extends AbstractLayerTool implements IChoroplethLayerT
     /**
      * Help function which returns a scale which can be used to distinguish value levels in choropleth.
      */
-    protected getScale(): number[] | undefined {
+    public getScale(): number[] | undefined {
         // get values
         const values: number[] = [];
         let id: string | number | undefined;
@@ -551,6 +679,9 @@ class ChoroplethLayerTool extends AbstractLayerTool implements IChoroplethLayerT
             path.style.fill = null;
             path.style.fillOpacity = null;
         }
+        
+        // add info about part of map to path attribute (for testing purposes)
+        path._current = {shortId: feature?.id};
 
         // selected / highlighted
         const selection: IMapSelection | null | undefined = this.getSelectionTool()?.getSelection() ?? undefined;
@@ -601,7 +732,7 @@ class ChoroplethLayerTool extends AbstractLayerTool implements IChoroplethLayerT
      * @param val 
      * @param scale 
      */
-    protected computeColorIntensity(val: number, scale: number[]): number {
+    public computeColorIntensity(val: number, scale: number[]): number {
         for(let i = scale.length - 1; i >= 0; i--) {
             if(val > scale[i]) {
                 // round to 2 decimals

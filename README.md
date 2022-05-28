@@ -46,6 +46,9 @@ map.draw(Geovisto.getMapConfigManagerFactory().default({
         "color": "#e32400",
         "range": 7, // 1..7
         "scaling": "median", // [ "median", "relative [0-max]", "relative [min-max]", "decimal [0-max]" ]
+        "units": "$", // units shortcut
+        "unitsDesc": "US Dollars", // units label
+        "round": 1 // rounding
       }
     },
   ]
